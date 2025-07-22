@@ -1,5 +1,36 @@
 import React, { useState, useEffect, createContext, useContext, useCallback, useMemo } from 'react';
 
+// Helper function to compare tournament configurations
+// Moved outside of React components to avoid unnecessary dependency warnings in useEffect
+const areTournamentConfigsEqual = (config1, config2) => {
+  if (!config1 || !config2) return false; // One or both are null/undefined
+
+  // Compare basic properties
+  const basicPropsEqual = (
+    config1.name === config2.name &&
+    config1.numPlayers === config2.numPlayers &&
+    config1.numCourts === config2.numCourts &&
+    config1.matchDuration === config2.matchDuration &&
+    config1.breakDuration === config2.breakDuration &&
+    config1.startTime === config2.startTime && // New comparison
+    config1.endTime === config2.endTime &&      // New comparison
+    config1.balanceTeamsByLevel === config2.balanceTeamsByLevel &&
+    config1.numPlayersPerTeam === config2.numPlayersPerTeam
+  );
+
+  if (!basicPropsEqual) return false;
+
+  // Compare selectedPlayerIds arrays
+  const selectedPlayersEqual = (
+    Array.isArray(config1.selectedPlayerIds) &&
+    Array.isArray(config2.selectedPlayerIds) &&
+    config1.selectedPlayerIds.length === config2.selectedPlayerIds.length &&
+    config1.selectedPlayerIds.every(id => config2.selectedPlayerIds.includes(id))
+  );
+
+  return selectedPlayersEqual;
+};
+
 // Contexte pour la gestion des données locales
 const LocalDataContext = createContext(null);
 
@@ -11,24 +42,17 @@ const LocalDataProvider = ({ children }) => {
     if (savedPlayers) {
       return JSON.parse(savedPlayers);
     }
-    // Données par défaut pour le "Groupe Test"
-    return [
-      { id: 'p1', name: 'Alice', level: 8, groupId: 'g1' },
-      { id: 'p2', name: 'Bob', level: 5, groupId: 'g1' },
-      { id: 'p3', name: 'Charlie', level: 7, groupId: 'g1' },
-      { id: 'p4', name: 'Diana', level: 4, groupId: 'g1' },
-      { id: 'p5', name: 'Eve', level: 9, groupId: 'g1' },
-      { id: 'p6', name: 'Frank', level: 6, groupId: 'g1' },
-      { id: 'p7', name: 'Grace', level: 3, groupId: 'g1' },
-      { id: 'p8', name: 'Heidi', level: 7, groupId: 'g1' },
-      { id: 'p9', name: 'Ivan', level: 6, groupId: 'g1' },
-      { id: 'p10', name: 'Julia', level: 8, groupId: 'g1' },
-      { id: 'p11', name: 'Kevin', level: 5, groupId: 'g1' },
-      { id: 'p12', name: 'Laura', level: 7, groupId: 'g1' },
-      { id: 'p13', name: 'Mike', level: 4, groupId: 'g1' },
-      { id: 'p14', name: 'Nora', level: 9, groupId: 'g1' },
-      { id: 'p15', name: 'Oscar', level: 6, groupId: 'g1' },
+    // Données par défaut pour le "Groupe Test" nommé "Pickleball"
+    const pickleballPlayers = [
+        'Guillaume', 'Céline', 'Albert', 'Ludovic', 'Claire', 'Ernesto', 'Jean-Luc',
+        'Youssef', 'Nicky', 'Elodie', 'Julien', 'Marie', 'Alain', 'Carine', 'Christian', 'Laurent'
     ];
+    return pickleballPlayers.map((name, index) => ({
+      id: `p${index + 1}`,
+      name: name,
+      level: Math.floor(Math.random() * 10) + 1, // Niveau aléatoire entre 1 et 10
+      groupId: 'g1' // Assigner au groupe "Pickleball"
+    }));
   });
 
   const [playerGroups, setPlayerGroups] = useState(() => {
@@ -37,8 +61,8 @@ const LocalDataProvider = ({ children }) => {
     if (savedGroups) {
       return JSON.parse(savedGroups);
     }
-    // Données par défaut pour le "Groupe Test"
-    return [{ id: 'g1', name: 'Groupe Test' }];
+    // Données par défaut pour le groupe "Pickleball"
+    return [{ id: 'g1', name: 'Pickleball' }];
   });
 
   const [tournaments, setTournaments] = useState(() => {
@@ -57,6 +81,13 @@ const LocalDataProvider = ({ children }) => {
     const savedSchedules = localStorage.getItem('matchplanner_generatedSchedules');
     return savedSchedules ? JSON.parse(savedSchedules) : {};
   });
+
+  // État pour la dernière configuration de tournoi générée (pour la comparaison)
+  const [lastGeneratedTournamentConfig, setLastGeneratedTournamentConfig] = useState(() => {
+    const savedConfig = localStorage.getItem('matchplanner_lastGeneratedTournamentConfig');
+    return savedConfig ? JSON.parse(savedConfig) : null;
+  });
+
 
   // Simuler un userId pour le stockage local
   // eslint-disable-next-line no-unused-vars
@@ -82,6 +113,42 @@ const LocalDataProvider = ({ children }) => {
   useEffect(() => {
     localStorage.setItem('matchplanner_generatedSchedules', JSON.stringify(generatedSchedules));
   }, [generatedSchedules]);
+
+  // Persister lastGeneratedTournamentConfig
+  useEffect(() => {
+    localStorage.setItem('matchplanner_lastGeneratedTournamentConfig', JSON.stringify(lastGeneratedTournamentConfig));
+  }, [lastGeneratedTournamentConfig]);
+
+
+  // Créer une rencontre test par défaut si aucune n'existe
+  useEffect(() => {
+    if (tournaments.length === 0 && players.length > 0 && playerGroups.length > 0) {
+      const defaultTournamentName = "Rencontre Test Pickleball";
+      const pickleballGroup = playerGroups.find(g => g.name === "Pickleball");
+
+      if (pickleballGroup) {
+        const playersInPickleballGroup = players.filter(p => p.groupId === pickleballGroup.id);
+        const defaultTournament = {
+          id: crypto.randomUUID(),
+          name: defaultTournamentName,
+          numPlayers: playersInPickleballGroup.length, // Nombre de joueurs du groupe Pickleball
+          numCourts: 2,
+          matchDuration: 12,
+          breakDuration: 1,
+          startTime: '18:00',
+          endTime: '20:00',
+          balanceTeamsByLevel: true,
+          selectedGroupForTournament: pickleballGroup.id,
+          numPlayersPerTeam: 2,
+          selectedPlayerIds: playersInPickleballGroup.map(p => p.id),
+          createdAt: new Date().toISOString(),
+        };
+        setTournaments([defaultTournament]);
+        console.log("Rencontre test 'Pickleball' créée automatiquement.");
+      }
+    }
+  }, [tournaments, players, playerGroups]); // Dépendances pour s'assurer que les données sont chargées
+
 
   // Memoize shuffleArray to prevent it from changing on every render
   const shuffleArray = useCallback((array) => {
@@ -199,7 +266,8 @@ const LocalDataProvider = ({ children }) => {
         playerGroups, setPlayerGroups, addGroup, deleteGroup,
         tournaments, setTournaments, addTournament, updateTournament, deleteTournament, getTournamentById,
         allMatches, getMatchesForTournament, saveMatchesForTournament, updateMatchScore,
-        generatedSchedules, getGeneratedSchedule, saveGeneratedSchedule, // Add schedule functions
+        generatedSchedules, getGeneratedSchedule, saveGeneratedSchedule,
+        lastGeneratedTournamentConfig, setLastGeneratedTournamentConfig, // Provide setter for persistence
         userId, // Simulé
         isAuthReady: true, // Toujours prêt en mode local
         shuffleArray // Provide shuffleArray via context
@@ -213,9 +281,21 @@ const LocalDataProvider = ({ children }) => {
 // Hook personnalisé pour utiliser les données locales
 const useLocalData = () => useContext(LocalDataContext);
 
+// Composant FeatureButton (déplacé ici pour être défini avant HomePage)
+const FeatureButton = ({ icon, title, onClick }) => (
+  <button
+    onClick={onClick}
+    className="bg-white text-indigo-700 font-bold py-2 px-6 rounded-full shadow-lg hover:bg-indigo-100 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50 flex flex-col items-center justify-center min-w-[150px] text-center text-sm sm:text-base" // Adjusted sizes
+  >
+    <span className="text-3xl mb-1">{icon}</span> {/* Adjusted icon size */}
+    <span>{title}</span>
+  </button>
+);
+
 // Composant de la page d'accueil
 const HomePage = ({ onNavigate }) => {
   // userId is not directly used in the HomePage's render, so it's removed from destructuring.
+  const appVersion = "1.0.9"; // Numéro de version mis à jour
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-500 to-indigo-600 text-white p-4 sm:p-8 flex flex-col items-center justify-center font-inter">
@@ -246,20 +326,11 @@ const HomePage = ({ onNavigate }) => {
             onClick={() => onNavigate('results')}
           />
         </div>
+        <p className="text-sm opacity-70 mt-4">Version: {appVersion}</p> {/* Afficher le numéro de version */}
       </div>
     </div>
   );
 };
-
-const FeatureButton = ({ icon, title, onClick }) => (
-  <button
-    onClick={onClick}
-    className="bg-white text-indigo-700 font-bold py-3 px-8 rounded-full shadow-lg hover:bg-indigo-100 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50 flex flex-col items-center justify-center min-w-[180px] min-h-[120px] text-center"
-  >
-    <span className="text-4xl mb-2">{icon}</span>
-    <span>{title}</span>
-  </button>
-);
 
 // Nouveau composant pour les champs numériques avec boutons d'incrémentation/décrémentation
 const NumberInputWithControls = ({ label, value, onChange, min, max, placeholder, id, readOnly = false }) => {
@@ -422,21 +493,41 @@ const PlayerSelectionModal = ({
 // Composant de configuration du tournoi
 const TournamentSetup = ({
   onNavigate,
-  tournamentName, setTournamentName,
-  numPlayers, setNumPlayers, // numPlayers is still passed but will be readOnly
-  numCourts, setNumCourts,
-  matchDuration, setMatchDuration,
-  breakDuration, setBreakDuration,
-  tournamentStartTime, setTournamentStartTime, // New prop
-  tournamentEndTime, setTournamentEndTime,      // New prop
-  balanceTeamsByLevel, setBalanceTeamsByLevel,
-  selectedGroupForTournament, setSelectedGroupForTournament,
-  numPlayersPerTeam, setNumPlayersPerTeam,
-  selectedPlayerIdsForCurrentTournament, setSelectedPlayerIdsForCurrentTournament, // Nouvelle prop
-  onOpenPlayerSelectionModal // New prop for opening the modal from App
+  tournamentConfig, setTournamentConfig, // Now receiving a single object and its setter
+  onOpenPlayerSelectionModal
 }) => {
   const { addTournament, updateTournament, tournaments, playerGroups, players } = useLocalData();
   const [message, setMessage] = useState('');
+
+  // Use local state for form fields, initialized from tournamentConfig prop
+  // This allows internal changes without immediately affecting parent state
+  const [localTournamentName, setLocalTournamentName] = useState(tournamentConfig.name ?? '');
+  const [localNumPlayersPerTeam, setLocalNumPlayersPerTeam] = useState(String(tournamentConfig.numPlayersPerTeam ?? ''));
+  const [localNumCourts, setLocalNumCourts] = useState(String(tournamentConfig.numCourts ?? ''));
+  const [localMatchDuration, setLocalMatchDuration] = useState(String(tournamentConfig.matchDuration ?? ''));
+  const [localBreakDuration, setLocalBreakDuration] = useState(String(tournamentConfig.breakDuration ?? ''));
+  const [localTournamentStartTime, setLocalTournamentStartTime] = useState(tournamentConfig.startTime ?? '');
+  const [localTournamentEndTime, setLocalTournamentEndTime] = useState(tournamentConfig.endTime ?? '');
+  const [localBalanceTeamsByLevel, setLocalBalanceTeamsByLevel] = useState(tournamentConfig.balanceTeamsByLevel ?? false);
+  const [localSelectedGroupForTournament, setLocalSelectedGroupForTournament] = useState(tournamentConfig.selectedGroupForTournament ?? '');
+  const [localSelectedPlayerIds, setLocalSelectedPlayerIds] = useState(tournamentConfig.selectedPlayerIds ?? []);
+
+
+  // Effect to update local state when prop changes (e.g., when loading a tournament from ManageTournaments)
+  useEffect(() => {
+    // Ensure all values are consistently strings or appropriate defaults to avoid controlled/uncontrolled warnings
+    setLocalTournamentName(tournamentConfig.name ?? '');
+    setLocalNumPlayersPerTeam(String(tournamentConfig.numPlayersPerTeam ?? '2')); // Default to '2' if null/undefined
+    setLocalNumCourts(String(tournamentConfig.numCourts ?? ''));
+    setLocalMatchDuration(String(tournamentConfig.matchDuration ?? ''));
+    setLocalBreakDuration(String(tournamentConfig.breakDuration ?? ''));
+    setLocalTournamentStartTime(tournamentConfig.startTime ?? '');
+    setLocalTournamentEndTime(tournamentConfig.endTime ?? '');
+    setLocalBalanceTeamsByLevel(tournamentConfig.balanceTeamsByLevel ?? false);
+    setLocalSelectedGroupForTournament(tournamentConfig.selectedGroupForTournament ?? '');
+    setLocalSelectedPlayerIds(tournamentConfig.selectedPlayerIds ?? []);
+  }, [tournamentConfig]); // Dependency on the entire tournamentConfig object
+
 
   // Efface le message après 3 secondes
   useEffect(() => {
@@ -451,48 +542,45 @@ const TournamentSetup = ({
   // Handle group selection to pre-fill numPlayers and reset selected players
   const handleGroupSelect = (e) => {
     const groupId = e.target.value;
-    setSelectedGroupForTournament(groupId); // Update the selected group ID
+    setLocalSelectedGroupForTournament(groupId); // Update the selected group ID
 
     if (groupId) {
       const playersInGroup = players.filter(p => p.groupId === groupId);
-      setNumPlayers(String(playersInGroup.length)); // Pre-fill numPlayers with group size
-      setSelectedPlayerIdsForCurrentTournament(playersInGroup.map(p => p.id)); // Select all players in group by default
+      setLocalSelectedPlayerIds(playersInGroup.map(p => p.id)); // Select all players in group by default
     } else {
-      setNumPlayers(''); // Clear numPlayers if "Select a group" is chosen
-      setSelectedPlayerIdsForCurrentTournament([]); // Clear selected players
+      setLocalSelectedPlayerIds([]); // Clear selected players
     }
   };
 
   const handleSaveSelectedPlayers = (selectedIds) => {
-    setSelectedPlayerIdsForCurrentTournament(selectedIds);
-    setNumPlayers(String(selectedIds.length)); // Update numPlayers based on actual selection
+    setLocalSelectedPlayerIds(selectedIds);
     setMessage("Joueurs sélectionnés avec succès !");
   };
 
 
-  const handleCreateTournament = () => {
+  const handleCreateTournament = async () => {
     // Convertir les valeurs en nombres pour la validation et la sauvegarde
-    const parsedNumPlayers = selectedPlayerIdsForCurrentTournament.length; // Now directly from selected players
-    const parsedNumCourts = parseInt(numCourts);
-    const parsedMatchDuration = parseInt(matchDuration);
-    const parsedBreakDuration = parseInt(breakDuration);
-    const parsedNumPlayersPerTeam = parseInt(numPlayersPerTeam); // Nouvelle parsing
+    const parsedNumPlayers = localSelectedPlayerIds.length; // Now directly from selected players
+    const parsedNumCourts = parseInt(localNumCourts);
+    const parsedMatchDuration = parseInt(localMatchDuration);
+    const parsedBreakDuration = parseInt(localBreakDuration);
+    const parsedNumPlayersPerTeam = parseInt(localNumPlayersPerTeam); // Nouvelle parsing
 
     // Validation des champs: vérifier si la chaîne est vide ou si la valeur parsée est invalide/non positive
     if (
-      !tournamentName.trim() ||
+      !localTournamentName.trim() ||
       isNaN(parsedNumPlayers) || parsedNumPlayers <= 0 ||
       isNaN(parsedNumCourts) || parsedNumCourts <= 0 ||
       isNaN(parsedMatchDuration) || parsedMatchDuration <= 0 ||
       isNaN(parsedBreakDuration) || parsedBreakDuration < 0 || // La durée de pause peut être 0
-      !tournamentStartTime.trim() || !tournamentEndTime.trim() || // New validation for start/end times
+      !localTournamentStartTime.trim() || !localTournamentEndTime.trim() || // New validation for start/end times
       isNaN(parsedNumPlayersPerTeam) || parsedNumPlayersPerTeam <= 0 // Nouvelle validation
     ) {
       setMessage("Veuillez remplir tous les champs obligatoires avec des valeurs numériques valides et positives (la durée de pause peut être zéro) et spécifier les heures de début et de fin.");
       return;
     }
 
-    if (selectedPlayerIdsForCurrentTournament.length === 0) {
+    if (localSelectedPlayerIds.length === 0) {
         setMessage("Veuillez sélectionner au moins un joueur pour la rencontre.");
         return;
     }
@@ -502,45 +590,66 @@ const TournamentSetup = ({
         return;
     }
 
-    // Validate start time is before end time
-    const startDateTime = new Date(`2000-01-01T${tournamentStartTime}`);
-    const endDateTime = new Date(`2000-01-01T${tournamentEndTime}`);
-    if (endDateTime <= startDateTime) {
-      setMessage("L'heure de fin doit être après l'heure de début.");
+    // Validate start time is before end time, handling midnight crossover
+    const startDateTime = new Date(`2000-01-01T${localTournamentStartTime}`);
+    let endDateTime = new Date(`2000-01-01T${localTournamentEndTime}`);
+
+    // If end time is numerically earlier than start time, assume it's on the next day
+    if (endDateTime.getTime() <= startDateTime.getTime() && localTournamentEndTime !== localTournamentStartTime) {
+      endDateTime.setDate(endDateTime.getDate() + 1); // Add one day
+    }
+
+    if (endDateTime.getTime() <= startDateTime.getTime()) { // Re-check after potential adjustment
+      setMessage("L'heure de fin doit être après l'heure de début, ou sur le jour suivant si la rencontre se prolonge après minuit.");
       return;
     }
 
 
     try {
       // Vérifier si une rencontre avec ce nom existe déjà
-      const existingTournament = tournaments.find(t => t.name.trim() === tournamentName.trim());
+      const existingTournament = tournaments.find(t => t.name.trim() === localTournamentName.trim());
 
       const tournamentData = {
-        name: tournamentName.trim(),
+        id: existingTournament ? existingTournament.id : crypto.randomUUID(), // Use existing ID if updating
+        name: localTournamentName.trim(),
         numPlayers: parsedNumPlayers, // This is now the count of selectedPlayerIds
         numCourts: parsedNumCourts,
         matchDuration: parsedMatchDuration,
         breakDuration: parsedBreakDuration,
-        startTime: tournamentStartTime, // Save start time string
-        endTime: tournamentEndTime,      // Save end time string
-        balanceTeamsByLevel,
-        selectedGroupForTournament: selectedGroupForTournament || null, // Save selected group ID
+        startTime: localTournamentStartTime, // Save start time string
+        endTime: localTournamentEndTime,      // Save end time string
+        balanceTeamsByLevel: localBalanceTeamsByLevel,
+        selectedGroupForTournament: localSelectedGroupForTournament || null, // Save selected group ID
         numPlayersPerTeam: parsedNumPlayersPerTeam, // Sauvegarde de la nouvelle prop
-        selectedPlayerIds: selectedPlayerIdsForCurrentTournament // Sauvegarde des IDs des joueurs sélectionnés
+        selectedPlayerIds: localSelectedPlayerIds // Sauvegarde des IDs des joueurs sélectionnés
       };
 
       if (existingTournament) {
         // La rencontre avec ce nom existe, la mettre à jour
-        updateTournament(existingTournament.id, tournamentData);
-        setMessage(`Rencontre "${tournamentName}" mise à jour avec succès !`);
+        await updateTournament(existingTournament.id, tournamentData);
+        setMessage(`Rencontre "${localTournamentName}" mise à jour avec succès !`);
       } else {
         // Aucune rencontre avec ce nom, en créer une nouvelle
-        addTournament(tournamentData);
+        await addTournament(tournamentData);
         setMessage("Nouvelle rencontre créée avec succès !");
       }
 
-      // Naviguer vers la page de planification des rencontres
-      onNavigate('matchSchedule');
+      // Après la création/mise à jour réussie, mettre à jour l'état du parent
+      // et naviguer vers la planification des matchs.
+      setTournamentConfig({ // Reset the parent state after saving
+        tournamentName: '',
+        numPlayers: '',
+        numPlayersPerTeam: '2',
+        numCourts: '',
+        matchDuration: '',
+        breakDuration: '',
+        tournamentStartTime: '',
+        tournamentEndTime: '',
+        balanceTeamsByLevel: false,
+        selectedGroupForTournament: '',
+        selectedPlayerIds: [],
+      });
+      onNavigate('matchSchedule', { selectedTournament: tournamentData }); // Passer la rencontre nouvellement créée/mise à jour
     } catch (error) {
       console.error("Erreur lors de la création/mise à jour du tournoi :", error);
       setMessage("Erreur lors de la création/mise à jour du tournoi. Veuillez réessayer.");
@@ -559,7 +668,7 @@ const TournamentSetup = ({
         </button>
       </div>
       <div className="bg-white bg-opacity-20 backdrop-filter backdrop-blur-lg rounded-xl shadow-2xl p-6 sm:p-10 max-w-2xl w-full text-center border border-white border-opacity-30">
-        <h2 className="text-3xl sm:text-4xl font-bold mb-6 text-center">Configurer une nouvelle rencontre</h2>
+        <h2 className="text-3xl sm:text-4xl font-bold mb-6 text-center">Configurateur de rencontre</h2>
 
         <div className="space-y-4 mb-6">
           <div>
@@ -567,16 +676,16 @@ const TournamentSetup = ({
             <input
               type="text"
               id="tournamentName"
-              value={tournamentName}
-              onChange={(e) => setTournamentName(e.target.value)} // Permet la chaîne vide
+              value={localTournamentName}
+              onChange={(e) => setLocalTournamentName(e.target.value)} // Permet la chaîne vide
               className="w-full p-3 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white placeholder-gray-200 focus:outline-none focus:ring-2 focus:ring-white"
             />
           </div>
           <div>
-            <label htmlFor="selectGroup" className="block text-lg font-medium mb-1">Sélectionner le groupe de joueurs et choisissez qui joue</label> {/* Updated label */}
+            <label htmlFor="selectGroup" className="block text-lg font-medium mb-1">Sélectionner le groupe de joueurs & Sélectionner les joueurs</label> {/* Updated label */}
             <select
               id="selectGroup"
-              value={selectedGroupForTournament || ''}
+              value={localSelectedGroupForTournament || ''}
               onChange={handleGroupSelect}
               className="w-full p-3 rounded-lg bg-white bg-opacity-30 border border-white bg-opacity-40 text-white focus:outline-none focus:ring-2 focus:ring-white"
             >
@@ -587,46 +696,46 @@ const TournamentSetup = ({
             </select>
           </div>
           {/* Removed NumberInputWithControls for numPlayers as requested */}
-          {selectedGroupForTournament && (
+          {localSelectedGroupForTournament && (
             <button
-              onClick={() => onOpenPlayerSelectionModal(selectedGroupForTournament, selectedPlayerIdsForCurrentTournament, handleSaveSelectedPlayers)} // Pass data to App's modal handler
+              onClick={() => onOpenPlayerSelectionModal(localSelectedGroupForTournament, localSelectedPlayerIds, handleSaveSelectedPlayers)} // Pass data to App's modal handler
               className="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-blue-600 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
             >
-              Sélectionner les joueurs ({selectedPlayerIdsForCurrentTournament.length} joueurs)
+              Sélectionner les joueurs ({localSelectedPlayerIds.length} joueurs)
             </button>
           )}
 
-          {/* Reorganized fields into a 2x2 grid */}
-          <div className="grid grid-cols-2 gap-4 w-full"> {/* Added w-full here for alignment */}
+          {/* Reorganized fields to be on distinct lines */}
+          <div className="space-y-4 w-full"> {/* Changed to space-y-4 for vertical stacking */}
             <NumberInputWithControls
               id="numPlayersPerTeam"
               label="Joueurs par équipe"
-              value={numPlayersPerTeam}
-              onChange={setNumPlayersPerTeam}
+              value={localNumPlayersPerTeam}
+              onChange={setLocalNumPlayersPerTeam}
               min={1}
               placeholder="Ex: 2"
             />
             <NumberInputWithControls
               id="numCourts"
               label="Nombre de terrains"
-              value={numCourts}
-              onChange={setNumCourts}
+              value={localNumCourts}
+              onChange={setLocalNumCourts}
               min={1}
               placeholder="Ex: 2"
             />
             <NumberInputWithControls
               id="matchDuration"
               label="Durée match (min)"
-              value={matchDuration}
-              onChange={setMatchDuration}
+              value={localMatchDuration}
+              onChange={setLocalMatchDuration}
               min={1}
               placeholder="Ex: 15"
             />
             <NumberInputWithControls
               id="breakDuration"
               label="Durée pause (min)"
-              value={breakDuration}
-              onChange={setBreakDuration}
+              value={localBreakDuration}
+              onChange={setLocalBreakDuration}
               min={0}
               placeholder="Ex: 5"
             />
@@ -637,8 +746,8 @@ const TournamentSetup = ({
             <input
               type="time"
               id="tournamentStartTime"
-              value={tournamentStartTime}
-              onChange={(e) => setTournamentStartTime(e.target.value)}
+              value={localTournamentStartTime}
+              onChange={(e) => setLocalTournamentStartTime(e.target.value)}
               className="w-full p-3 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white placeholder-gray-200 focus:outline-none focus:ring-2 focus:ring-white"
             />
           </div>
@@ -647,19 +756,19 @@ const TournamentSetup = ({
             <input
               type="time"
               id="tournamentEndTime"
-              value={tournamentEndTime}
-              onChange={(e) => setTournamentEndTime(e.target.value)}
-              className="w-full p-3 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white focus:outline-none focus:ring-2 focus:ring-white"
+              value={localTournamentEndTime}
+              onChange={(e) => setLocalTournamentEndTime(e.target.value)}
+              className="w-full p-3 rounded-lg bg-white bg-opacity-30 border border-white bg-opacity-40 text-white focus:outline-none focus:ring-2 focus:ring-white"
             />
           </div>
           {/* Replaced checkbox with a button */}
           <button
-            onClick={() => setBalanceTeamsByLevel(prev => !prev)}
+            onClick={() => setLocalBalanceTeamsByLevel(prev => !prev)}
             className={`w-full font-bold py-3 px-6 rounded-full shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50
-              ${balanceTeamsByLevel ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-300 text-gray-800 hover:bg-gray-400'}
+              ${localBalanceTeamsByLevel ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-gray-300 text-gray-800 hover:bg-gray-400'}
             `}
           >
-            Équilibrage par niveau: {balanceTeamsByLevel ? 'Activé' : 'Désactivé'}
+            Équilibrage par niveau: {localBalanceTeamsByLevel ? 'Activé' : 'Désactivé'}
           </button>
         </div>
 
@@ -672,7 +781,7 @@ const TournamentSetup = ({
             onClick={handleCreateTournament}
             className="bg-white text-indigo-700 font-bold py-3 px-6 rounded-full shadow-lg hover:bg-indigo-100 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
           >
-            Créer la rencontre
+            Générer la rencontre
           </button>
         </div>
       </div>
@@ -680,7 +789,7 @@ const TournamentSetup = ({
       <div className="w-full flex justify-center mt-8">
         <button
           onClick={() => onNavigate('home')}
-          className="bg-transparent border border-white text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
+          className="bg-transparent border border-white text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
         >
           Retour à l'accueil
         </button>
@@ -817,7 +926,7 @@ const PlayerManagement = ({ onNavigate }) => { // Removed fromHome and setPlayer
 
         {/* Section de gestion des groupes */}
         <div className="mb-8 p-4 bg-white bg-opacity-15 rounded-lg border border-white border-opacity-20">
-          <h3 className="text-2xl font-bold mb-4">Créer et gérer les groupes</h3>
+          <h3 className="text-2xl font-bold mb-4">Créer un nouveau groupe</h3> {/* Changed text */}
           <div className="flex flex-col sm:flex-row gap-4 mb-4">
             {/* Replaced input and button with a single button to open modal */}
             <button
@@ -838,13 +947,13 @@ const PlayerManagement = ({ onNavigate }) => { // Removed fromHome and setPlayer
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleManageGroupPlayers(group)}
-                      className="bg-blue-500 text-white py-1 px-3 rounded-full text-xs hover:bg-blue-600 transition duration-300"
+                      className="bg-blue-500 text-white py-1 px-2 rounded-full text-xs hover:bg-blue-600 transition duration-300" // Reduced padding
                     >
                       Gérer joueurs du groupe
                     </button>
                     <button
                       onClick={() => handleDeleteGroup(group.id)}
-                      className="bg-red-500 text-white py-1 px-3 rounded-full text-xs hover:bg-red-600 transition duration-300"
+                      className="bg-red-500 text-white py-1 px-2 rounded-full text-xs hover:bg-red-600 transition duration-300" // Reduced padding
                     >
                       Supprimer
                     </button>
@@ -858,7 +967,7 @@ const PlayerManagement = ({ onNavigate }) => { // Removed fromHome and setPlayer
         {/* Section d'ajout de joueur */}
         <div className="mb-6">
           {/* Removed "Nombre de joueurs actuellement créés..." phrase */}
-          <h3 className="text-2xl font-bold mb-4">Liste des joueurs <span className="text-lg opacity-80">({players.length} Joueurs totaux)</span></h3> {/* Added total players */}
+          <h3 className="text-2xl font-bold mb-4">Ajout de Joueurs</h3> {/* Changed text */}
           <div className="flex flex-col sm:flex-row gap-4 mb-4">
             <input
               type="text"
@@ -933,7 +1042,7 @@ const PlayerManagement = ({ onNavigate }) => { // Removed fromHome and setPlayer
       <div className="w-full flex justify-center mt-8">
         <button
           onClick={() => onNavigate('home')}
-          className="bg-transparent border border-white text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
+          className="bg-transparent border border-white text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
         >
           Retour à l'accueil
         </button>
@@ -1033,45 +1142,13 @@ const PlayerManagement = ({ onNavigate }) => { // Removed fromHome and setPlayer
   );
 };
 
-// Helper function to compare tournament configurations
-const areTournamentConfigsEqual = (config1, config2) => {
-  // Helper function to compare tournament configurations
-  if (!config1 || !config2) return false; // One or both are null/undefined
-
-  // Compare basic properties
-  const basicPropsEqual = (
-    config1.name === config2.name &&
-    config1.numPlayers === config2.numPlayers &&
-    config1.numCourts === config2.numCourts &&
-    config1.matchDuration === config2.matchDuration &&
-    config1.breakDuration === config2.breakDuration &&
-    config1.startTime === config2.startTime && // New comparison
-    config1.endTime === config2.endTime &&      // New comparison
-    config1.balanceTeamsByLevel === config2.balanceTeamsByLevel &&
-    config1.numPlayersPerTeam === config2.numPlayersPerTeam
-  );
-
-  if (!basicPropsEqual) return false;
-
-  // Compare selectedPlayerIds arrays
-  const selectedPlayersEqual = (
-    Array.isArray(config1.selectedPlayerIds) &&
-    Array.isArray(config2.selectedPlayerIds) &&
-    config1.selectedPlayerIds.length === config2.selectedPlayerIds.length &&
-    config1.selectedPlayerIds.every(id => config2.selectedPlayerIds.includes(id))
-  );
-
-  return selectedPlayersEqual;
-};
-
-
 // Composant de planification des matchs
 const MatchSchedule = ({ onNavigate,
   selectedTournament, // Now passed as a prop
-  generatedScheduleTours, setGeneratedScheduleTours,
+  generatedSchedules, setGeneratedSchedules,
   currentTourIndex, setCurrentTourIndex,
   generatedForTournamentId, setGeneratedForTournamentId,
-  lastGeneratedTournamentConfig, setLastGeneratedTournamentConfig,
+  lastGeneratedTournamentConfig, setLastGeneratedTournamentConfig, // Now received from context
   onSelectTournament, // New prop to notify App of tournament selection
   selectedPlayerIdsForCurrentTournament // IDs des joueurs sélectionnés pour la rencontre active
 }) => {
@@ -1088,13 +1165,26 @@ const MatchSchedule = ({ onNavigate,
   // { matchId: { timeLeft: seconds, isRunning: boolean } }
   const [matchTimers, setMatchTimers] = useState({});
 
+  // Couleurs de fond pour les terrains (inspirées des terrains de sport réels)
+  const courtColors = useMemo(() => [
+    'bg-green-700', // Tennis court green
+    'bg-blue-700',  // Basketball court blue
+    'bg-red-700',   // Multi-sport court red
+    'bg-yellow-700', // Sand/beach court yellow-orange
+    'bg-purple-700', // Unique color for variety
+    'bg-pink-700',
+    'bg-teal-700',
+    'bg-indigo-700',
+  ], []);
+
+
   // Use useMemo for currentTour to ensure it's always defined or null
   const currentTour = useMemo(() => {
-    if (Array.isArray(generatedScheduleTours) && currentTourIndex >= 0 && currentTourIndex < generatedScheduleTours.length) {
-      return generatedScheduleTours[currentTourIndex];
+    if (Array.isArray(generatedSchedules) && currentTourIndex >= 0 && currentTourIndex < generatedSchedules.length) {
+      return generatedSchedules[currentTourIndex];
     }
     return null;
-  }, [generatedScheduleTours, currentTourIndex]);
+  }, [generatedSchedules, currentTourIndex]);
 
   const formatTime = (seconds) => {
     const minutes = Math.floor(seconds / 60);
@@ -1113,7 +1203,7 @@ const MatchSchedule = ({ onNavigate,
 
     // Si le pool actuel est insuffisant pour au moins un match, recharger à partir de la base des joueurs disponibles et mélanger
     if (tempPlayersPool.length < numPlayersPerMatch) {
-      console.log("DEBUG_SINGLE_TOUR: Not enough players in current pool for one match. Shuffling available players base."); // Debug log
+      console.log("DEBUG_SINGLE_TOUR: Not enough players in current pool for one match. Shuffling available availablePlayersPool."); // Debug log
       tempPlayersPool = shuffleArray([...availablePlayersBase]);
     }
 
@@ -1150,8 +1240,8 @@ const MatchSchedule = ({ onNavigate,
         // Trier les joueurs par niveau
         const sortedMatchPlayers = [...matchPlayers].sort((a, b) => parseInt(a.level) - parseInt(b.level));
         // Distribuer les joueurs pour équilibrer les équipes
-        for (let i = 0; i < numPlayersPerMatch; i++) {
-            if (i % 2 === 0) { // Alterner pour la première équipe
+        for (let i = 0; i < numPlayersPerMatch; i++) { // Alterner pour la première équipe
+            if (i % 2 === 0) {
                 team1.push(sortedMatchPlayers[i]);
             } else { // Alterner pour la deuxième équipe
                 team2.push(sortedMatchPlayers[i]);
@@ -1213,7 +1303,7 @@ const MatchSchedule = ({ onNavigate,
 
 
   const isTournamentFinishedState = useMemo(() => {
-    if (!selectedTournament || generatedScheduleTours.length === 0) {
+    if (!selectedTournament || generatedSchedules.length === 0) {
         console.log("DEBUG: isTournamentFinishedState - No tournament or no schedule. Returning true.");
         return true;
     }
@@ -1259,13 +1349,13 @@ const MatchSchedule = ({ onNavigate,
 
     console.log("DEBUG: isTournamentFinishedState - Tournament is NOT finished. Time available. Returning false.");
     return false;
-  }, [selectedTournament, generatedScheduleTours.length, currentTourIndex]); // Depend on selectedTournament, generatedScheduleTours.length, currentTourIndex
+  }, [selectedTournament, generatedSchedules.length, currentTourIndex]); // Depend on selectedTournament, generatedSchedules.length, currentTourIndex
 
 
   const handleNextTourLogic = useCallback(() => {
     if (!selectedTournament) return;
 
-    const updatedSchedule = [...generatedScheduleTours];
+    const updatedSchedule = [...generatedSchedules];
     const currentTourData = updatedSchedule[currentTourIndex];
 
     // 1. Mark current tour as completed and ensure scores are not null
@@ -1283,9 +1373,9 @@ const MatchSchedule = ({ onNavigate,
             isCompleted: true
         };
         // Also update individual match scores in allMatches for history page
-        updatedMatches.forEach(match => {
-            updateMatchScore(selectedTournament.id, match.id, 'team1', match.scoreTeam1);
-            updateMatchScore(selectedTournament.id, match.id, 'team2', match.scoreTeam2);
+        updatedMatches.forEach(matchItem => { // Corrected: use matchItem as parameter
+            updateMatchScore(selectedTournament.id, matchItem.id, 'team1', matchItem.scoreTeam1);
+            updateMatchScore(selectedTournament.id, matchItem.id, 'team2', matchItem.scoreTeam2);
         });
     }
 
@@ -1305,7 +1395,7 @@ const MatchSchedule = ({ onNavigate,
 
 
     // Check if there's a next pre-generated tour
-    if (currentTourIndex < generatedScheduleTours.length - 1) {
+    if (currentTourIndex < generatedSchedules.length - 1) {
         const nextTourIndex = currentTourIndex + 1;
         const nextTourData = updatedSchedule[nextTourIndex];
 
@@ -1331,13 +1421,13 @@ const MatchSchedule = ({ onNavigate,
             endTime: newNextTourActualEndTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
         };
 
-        setGeneratedScheduleTours(updatedSchedule); // Update App's state with new times
+        setGeneratedSchedules(updatedSchedule); // Update App's state with new times
         saveGeneratedSchedule(selectedTournament.id, updatedSchedule);
 
         setCurrentTourIndex(nextTourIndex);
         setTimer(selectedTournament.matchDuration * 60);
         setIsRunning(false);
-        setTimerMode('global'); // Reset to global timer mode for the new tour
+        setTimerMode('global'); // Reset to global mode for the new tour
 
     } else {
       // We are at the end of the pre-generated schedule. Attempt dynamic generation.
@@ -1370,7 +1460,7 @@ const MatchSchedule = ({ onNavigate,
       // ALWAYS add the new tour if time permits, even if it has no matches.
       const newTour = {
           ...newTourData, // This will include matches (possibly empty), playersPlayed, remainingPlayersPool
-          tour: generatedScheduleTours.length + 1,
+          tour: generatedSchedules.length + 1,
           actualStartTime: prospectiveNextTourStartTime.toISOString(),
           actualEndTime: prospectiveNextTourEndTime.toISOString(),
           startTime: prospectiveNextTourStartTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
@@ -1382,7 +1472,7 @@ const MatchSchedule = ({ onNavigate,
       };
 
       const updatedScheduleWithNewTour = [...updatedSchedule, newTour];
-      setGeneratedScheduleTours(updatedScheduleWithNewTour);
+      setGeneratedSchedules(updatedScheduleWithNewTour);
       saveGeneratedSchedule(selectedTournament.id, updatedScheduleWithNewTour);
 
       // Only save matches if there are any to save
@@ -1406,23 +1496,23 @@ const MatchSchedule = ({ onNavigate,
       setCurrentTourIndex(updatedScheduleWithNewTour.length - 1); // Move to the newly added tour
       setTimer(selectedTournament.matchDuration * 60);
       setIsRunning(false);
-      setTimerMode('global'); // Reset to global timer mode for the new tour
+      setTimerMode('global'); // Reset to global mode for the new tour
     }
     setShowConfirmationModal(false); // Close modal after action
-  }, [currentTourIndex, generatedScheduleTours, selectedTournament, setCurrentTourIndex, setTimer, setIsRunning, saveGeneratedSchedule, setGeneratedScheduleTours, updateMatchScore, players, selectedPlayerIdsForCurrentTournament, saveMatchesForTournament, getMatchesForTournament, generateSingleTourMatches]);
+  }, [currentTourIndex, generatedSchedules, selectedTournament, setCurrentTourIndex, setTimer, setIsRunning, saveGeneratedSchedule, setGeneratedSchedules, updateMatchScore, players, selectedPlayerIdsForCurrentTournament, saveMatchesForTournament, getMatchesForTournament, generateSingleTourMatches]);
 
 
   // Effect to manage global timer and running state when currentTourIndex or selectedTournament changes
   useEffect(() => {
-    if (!selectedTournament || generatedScheduleTours.length === 0) {
+    if (!selectedTournament || generatedSchedules.length === 0) {
       setTimer(0);
       setIsRunning(false);
       setTimerMode('global'); // Default to global mode
       return;
     }
 
-    if (currentTourIndex < generatedScheduleTours.length) {
-      const currentTourData = generatedScheduleTours[currentTourIndex];
+    if (currentTourIndex < generatedSchedules.length) {
+      const currentTourData = generatedSchedules[currentTourIndex];
       if (currentTourData.isCompleted) {
         setTimer(0);
         setIsRunning(false);
@@ -1439,7 +1529,7 @@ const MatchSchedule = ({ onNavigate,
     }
     // When tour changes, reset individual timers
     setMatchTimers({});
-  }, [currentTourIndex, generatedScheduleTours, selectedTournament]);
+  }, [currentTourIndex, generatedSchedules, selectedTournament]);
 
 
   // Timer for current time (display in corner)
@@ -1498,7 +1588,7 @@ const MatchSchedule = ({ onNavigate,
   }, [timerMode, matchTimers, currentTour, selectedTournament]);
 
 
-  const generateMatchSchedule = () => {
+  const generateMatchSchedule = useCallback(() => { // Made generateMatchSchedule a useCallback
     if (!selectedTournament) {
       console.log("DEBUG: No tournament selected."); // Debug log
       return;
@@ -1595,13 +1685,13 @@ const MatchSchedule = ({ onNavigate,
     }
 
     // Update App's state via props
-    setGeneratedScheduleTours(allGeneratedTours);
+    setGeneratedSchedules(allGeneratedTours);
     setCurrentTourIndex(0);
     setTimer(selectedTournament.matchDuration * 60);
     setIsRunning(false);
-    setTimerMode('global'); // Reset to global timer mode
+    setTimerMode('global'); // Reset to global mode
     setGeneratedForTournamentId(selectedTournament.id);
-    setLastGeneratedTournamentConfig({ ...selectedTournament });
+    setLastGeneratedTournamentConfig({ ...selectedTournament }); // This is the correct place to update it
 
     saveGeneratedSchedule(selectedTournament.id, allGeneratedTours);
 
@@ -1619,12 +1709,12 @@ const MatchSchedule = ({ onNavigate,
     );
     saveMatchesForTournament(selectedTournament.id, allMatchesToSave);
     console.log("DEBUG: Match schedule generated and saved successfully."); // Debug log
-  };
+  }, [selectedTournament, players, selectedPlayerIdsForCurrentTournament, shuffleArray, setGeneratedSchedules, setCurrentTourIndex, setTimer, setIsRunning, setTimerMode, setGeneratedForTournamentId, setLastGeneratedTournamentConfig, saveGeneratedSchedule, saveMatchesForTournament, generateSingleTourMatches]);
 
 
   const handleMatchScoreChange = (matchIdx, team, score) => {
-    const newScheduleTours = [...generatedScheduleTours];
-    const currentTourMatches = newScheduleTours[currentTourIndex].matches;
+    const newGeneratedSchedules = [...generatedSchedules]; // Use new variable name to avoid confusion
+    const currentTourMatches = newGeneratedSchedules[currentTourIndex].matches;
     const scoreValue = score === '' ? null : parseInt(score);
 
     const matchIdToUpdate = currentTourMatches[matchIdx].id;
@@ -1634,14 +1724,14 @@ const MatchSchedule = ({ onNavigate,
     } else {
         currentTourMatches[matchIdx].scoreTeam2 = scoreValue;
     }
-    setGeneratedScheduleTours(newScheduleTours); // Update App's state
+    setGeneratedSchedules(newGeneratedSchedules); // Update App's state
 
     // Now, persist the change using the granular updateMatchScore from context
     updateMatchScore(selectedTournament.id, matchIdToUpdate, team, scoreValue);
   };
 
   const toggleStartPauseResume = () => {
-    if (!selectedTournament || generatedScheduleTours.length === 0 || currentTourIndex >= generatedScheduleTours.length) {
+    if (!selectedTournament || generatedSchedules.length === 0 || currentTourIndex >= generatedSchedules.length) {
       return;
     }
 
@@ -1652,12 +1742,10 @@ const MatchSchedule = ({ onNavigate,
     }
   };
 
-  const handleStartTourTimer = () => {
+  const switchToGlobalTimerMode = () => { // Renamed from handleStartTourTimer
     if (selectedTournament) { // Check if selectedTournament is not null
-      if (timer <= 0) {
-          setTimer(selectedTournament.matchDuration * 60);
-      }
-      setIsRunning(true);
+      setTimer(selectedTournament.matchDuration * 60); // Reset timer
+      setIsRunning(false); // Do not start automatically
       setTimerMode('global');
       setMatchTimers({}); // Clear individual timers
       setShowTimerOptionsModal(false);
@@ -1749,7 +1837,7 @@ const MatchSchedule = ({ onNavigate,
         setTimer(selectedTournament.matchDuration * 60);
       }
       setIsRunning(false);
-      setTimerMode('global'); // Reset to global timer mode
+      setTimerMode('global'); // Reset to global mode
       setMatchTimers({}); // Clear individual timers
     }
   };
@@ -1777,11 +1865,22 @@ const MatchSchedule = ({ onNavigate,
     mainButtonText = "Démarrer le Chrono";
   }
 
-  const hasGeneratedBefore = selectedTournament && generatedForTournamentId === selectedTournament.id && generatedScheduleTours.length > 0;
-  const configHasChanged = selectedTournament && lastGeneratedTournamentConfig && !areTournamentConfigsEqual(selectedTournament, lastGeneratedTournamentConfig);
+  // Logic for automatic generation
+  const shouldGenerateAutomatically = selectedTournament && (
+    !generatedForTournamentId || // No schedule generated yet for this tournament
+    generatedForTournamentId !== selectedTournament.id || // Different tournament selected
+    !areTournamentConfigsEqual(selectedTournament, lastGeneratedTournamentConfig) // Config has changed
+  );
 
-  const showGenerateButton = !selectedTournament || !hasGeneratedBefore || configHasChanged;
-  const generateButtonText = hasGeneratedBefore && configHasChanged ? "Re Générer le tableau des matchs" : "Générer le tableau des matchs";
+  useEffect(() => {
+    if (shouldGenerateAutomatically) {
+      console.log("DEBUG: Auto-generating schedule due to config change or new selection.");
+      const timeoutId = setTimeout(() => {
+        generateMatchSchedule();
+      }, 0); // Changed delay to 0
+      return () => clearTimeout(timeoutId);
+    }
+  }, [shouldGenerateAutomatically, generateMatchSchedule]);
 
 
   let nextButtonText = "Match Suivant";
@@ -1789,7 +1888,7 @@ const MatchSchedule = ({ onNavigate,
 
   if (isTournamentFinishedState) {
       nextButtonText = "Rencontre Terminée";
-  } else if (currentTourIndex === generatedScheduleTours.length - 1) {
+  } else if (currentTourIndex === generatedSchedules.length - 1) {
       // If we are at the last pre-generated tour, and time is NOT up, we can generate more.
       nextButtonText = "Générer le prochain tour";
   }
@@ -1799,7 +1898,7 @@ const MatchSchedule = ({ onNavigate,
     if (!selectedTournament) {
         return "Veuillez sélectionner une rencontre.";
     }
-    if (generatedScheduleTours.length === 0) {
+    if (generatedSchedules.length === 0) {
         return "Aucun tableau des matchs généré."; // Updated text
     }
 
@@ -1813,25 +1912,12 @@ const MatchSchedule = ({ onNavigate,
         return "Rencontre terminée ! Le temps de jeu est écoulé.";
     }
 
-    // Case 2: Current tour is completed, and there are more pre-generated tours
-    if (currentTour && currentTour.isCompleted && currentTourIndex < generatedScheduleTours.length - 1) {
-        return "Tour terminé ! Pensez à saisir les scores et passez au tour suivant.";
-    }
-
-    // Case 3: All pre-generated tours are done, but more can be generated (time allows)
-    if (currentTourIndex >= generatedScheduleTours.length - 1 && !isTournamentFinishedState) {
-        // This means we are at the last pre-generated tour, or beyond, and time still permits
-        return "Prêt à générer le prochain tour.";
-    }
-
     // Default cases for active/paused tour
     if (timerMode === 'global') {
       if (isRunning) {
           return "Match en cours...";
-      } else if (timer > 0) {
-          return "Tour en pause.";
-      } else {
-          return "Tour prêt à démarrer."; // This covers the initial state of a tour
+      } else { // timer is 0 or paused
+          return "Tour prêt à démarrer.";
       }
     } else { // individual mode
       const anyMatchRunning = Object.values(matchTimers).some(t => t.isRunning);
@@ -1841,7 +1927,7 @@ const MatchSchedule = ({ onNavigate,
         return "Mode matchs individuels : prêts à démarrer ou en pause.";
       }
     }
-  }, [selectedTournament, generatedScheduleTours.length, currentTourIndex, isRunning, timer, isTournamentFinishedState, timerMode, matchTimers, currentTour]);
+  }, [selectedTournament, generatedSchedules.length, isRunning, timerMode, matchTimers, currentTour, isTournamentFinishedState]);
 
 
   return (
@@ -1850,13 +1936,13 @@ const MatchSchedule = ({ onNavigate,
       <div className="w-full flex justify-start mb-4">
         <button
           onClick={() => onNavigate('home')}
-          className="bg-transparent border border-white text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
+          className="bg-transparent border border-white text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity50"
         >
           Retour à l'accueil
         </button>
       </div>
       <div className="bg-white bg-opacity-20 backdrop-filter backdrop-blur-lg rounded-xl shadow-2xl p-6 sm:p-10 max-w-4xl w-full border border-white border-opacity-30">
-        <h2 className="text-3xl sm:text-4xl font-bold mb-6 text-center">Planification des rencontres</h2>
+        <h2 className="text-3xl sm:text-4xl font-bold mb-6 text-center">Planification des Matchs</h2>
 
         <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
           <div className="w-full sm:w-1/2">
@@ -1879,20 +1965,13 @@ const MatchSchedule = ({ onNavigate,
               )}
             </select>
           </div>
-          {showGenerateButton && (
-            <button
-              onClick={generateMatchSchedule}
-              className="bg-white text-indigo-700 font-bold py-3 px-6 rounded-full shadow-lg hover:bg-indigo-100 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
-            >
-              {generateButtonText}
-            </button>
-          )}
+          {/* Le bouton de génération est maintenant automatique, donc il n'est plus rendu ici. */}
         </div>
 
         <p className="text-center text-yellow-300 mb-4">{displayMessage()}</p>
 
         {/* Display players on bench only when a tournament is selected AND (timer is running OR timer is paused) AND a schedule exists */}
-        {(isRunning || timer > 0 || (currentTourIndex < generatedScheduleTours.length && !isTournamentFinishedState)) && selectedTournament && generatedScheduleTours.length > 0 && (
+        {(isRunning || timer > 0 || (currentTourIndex < generatedSchedules.length && !isTournamentFinishedState)) && selectedTournament && generatedSchedules.length > 0 && (
           <div className="bg-yellow-400 text-yellow-900 p-3 rounded-lg mb-4 text-center">
             {playersOnBenchNames.length > 0 ? (
               <p className="font-semibold">Joueurs sur le banc : {playersOnBenchNames.join(', ')}</p>
@@ -1903,7 +1982,7 @@ const MatchSchedule = ({ onNavigate,
         )}
 
         {/* Timer management buttons moved here */}
-        {(selectedTournament && generatedScheduleTours.length > 0 && currentTourIndex < generatedScheduleTours.length) && (
+        {(selectedTournament && generatedSchedules.length > 0 && currentTourIndex < generatedSchedules.length) && (
           <div className="flex flex-wrap justify-center gap-4 mt-4 mb-8">
             {timerMode === 'global' && (
               <button
@@ -1919,13 +1998,13 @@ const MatchSchedule = ({ onNavigate,
               onClick={resetMatchTimer}
               className="bg-gray-500 text-white font-bold py-2 px-5 rounded-full shadow-md hover:bg-gray-600 transition duration-300 focus:outline-none focus:ring-2 focus:ring-gray-400"
             >
-              Réinitialiser le tour
+              Réinitialiser Chrono
             </button>
             <button
               onClick={() => setShowTimerOptionsModal(true)}
               className="bg-purple-500 text-white font-bold py-2 px-5 rounded-full shadow-md hover:bg-purple-600 transition duration-300 focus:outline-none focus:ring-2 focus:ring-purple-400"
             >
-              {timerMode === 'global' ? 'Gérer les chronos' : 'Changer de mode Chrono'}
+              Changer mode Chrono
             </button>
           </div>
         )}
@@ -1957,26 +2036,29 @@ const MatchSchedule = ({ onNavigate,
                           const isMatchTimerRunning = currentMatchTimer?.isRunning || false;
                           const matchTimeLeft = currentMatchTimer?.timeLeft ?? (selectedTournament ? selectedTournament.matchDuration * 60 : 0); // Fallback if selectedTournament is null
 
+                          // Obtenir la couleur du terrain en fonction de l'index du terrain
+                          const courtColorClass = courtColors[(matchItem.court - 1) % courtColors.length];
+
                           return (
-                          <div key={matchItem.id} className="bg-white bg-opacity-20 p-4 rounded-lg shadow-inner relative">
+                          <div key={matchItem.id} className={`p-4 rounded-lg shadow-inner relative text-white ${courtColorClass}`}> {/* Appliquer la couleur ici */}
                               {isMatchCompleted && (
                                   <span className="absolute top-2 right-2 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full">Terminé</span>
                               )}
                               <p className="text-lg font-semibold mb-2 flex items-center justify-center">
                                 Terrain {matchItem.court}
                                 <img
-                                  src={`/86637.png`}
+                                  src={`https://placehold.co/24x24/cccccc/ffffff?text=?`}
                                   alt="Terrain de sport"
                                   className="w-6 h-6 ml-2 inline-block"
                                   onError={(e) => { e.target.onerror = null; e.target.src="https://placehold.co/24x24/cccccc/ffffff?text=?" }}
                                 />
                               </p>
                               <div className="flex flex-col gap-2">
-                                  <div className="bg-blue-700 bg-opacity-70 p-2 rounded-md">
+                                  <div className="bg-white bg-opacity-20 p-2 rounded-md"> {/* Utiliser une opacité pour le texte des équipes */}
                                       <p className="font-bold text-lg">{matchItem.team1.join(' & ')}</p>
                                   </div>
                                   <p className="text-xl font-bold text-gray-200">Contre</p>
-                                  <div className="bg-red-700 bg-opacity-70 p-2 rounded-md">
+                                  <div className="bg-white bg-opacity-20 p-2 rounded-md"> {/* Utiliser une opacité pour le texte des équipes */}
                                       <p className="font-bold text-lg">{matchItem.team2.join(' & ')}</p>
                                   </div>
                                   {/* Score input fields */}
@@ -2017,7 +2099,7 @@ const MatchSchedule = ({ onNavigate,
                                         </button>
                                         <button
                                           onClick={() => handleIndividualTimerReset(matchItem.id)}
-                                          className="bg-gray-500 text-white font-bold py-1 px-3 rounded-full text-xs shadow-md hover:bg-gray-600 transition duration-300"
+                                          className="bg-gray-500 text-white py-1 px-3 rounded-full text-xs shadow-md hover:bg-gray-600 transition duration-300"
                                         >
                                           Réinitialiser
                                         </button>
@@ -2059,24 +2141,24 @@ const MatchSchedule = ({ onNavigate,
         <div className="flex justify-center mt-8">
           <button
             onClick={() => onNavigate('matchHistory')}
-            className="bg-white text-indigo-700 font-bold py-3 px-6 rounded-full shadow-lg hover:bg-indigo-100 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
+            className="bg-white text-indigo-700 font-bold py-3 px-6 rounded-full shadow-lg hover:bg-indigo-100 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50 whitespace-nowrap" // Added whitespace-nowrap
           >
-            Matchs à venir & Historique
+            Matchs à venir & Historique des matchs
           </button>
         </div>
 
         <div className="flex justify-center gap-4 mt-8">
           <button
-            onClick={() => onNavigate('tournamentSetup')} // Changed navigation
+            onClick={() => onNavigate('tournamentSetup', { tournamentToLoad: selectedTournament })} // Changed navigation to pass selectedTournament
             className="bg-transparent border border-white text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
           >
-            Retour à la configuration des rencontres
+            Retour au générateur de rencontre
           </button>
           <button
             onClick={() => onNavigate('results')}
             className="bg-white text-indigo-700 font-bold py-3 px-6 rounded-full shadow-lg hover:bg-indigo-100 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
           >
-            Voir les résultats
+            Résultats & Classement
           </button>
         </div>
       </div>
@@ -2121,16 +2203,20 @@ const MatchSchedule = ({ onNavigate,
             <p className="mb-6">Comment souhaitez-vous gérer le temps des matchs ?</p>
             <div className="flex flex-col gap-4">
               <button
-                onClick={handleStartTourTimer}
-                className="bg-green-600 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-green-700 transition duration-300 focus:outline-none focus:ring-4 focus:ring-green-500"
+                onClick={switchToGlobalTimerMode} // Changed to switchToGlobalTimerMode
+                className={`font-bold py-3 px-6 rounded-full shadow-lg transition duration-300 focus:outline-none focus:ring-4
+                  ${timerMode === 'global' ? 'bg-green-600 text-white hover:bg-green-700 focus:ring-green-500' : 'bg-gray-300 text-gray-800 hover:bg-gray-400 focus:ring-gray-300'}
+                `}
               >
-                Démarrer le chrono du tour (Global)
+                Chrono Global
               </button>
               <button
                 onClick={handleManageIndividualMatches}
-                className="bg-blue-600 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-blue-700 transition duration-300 focus:outline-none focus:ring-4 focus:ring-blue-500"
+                className={`font-bold py-3 px-6 rounded-full shadow-lg transition duration-300 focus:outline-none focus:ring-4
+                  ${timerMode === 'individual' ? 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500' : 'bg-gray-300 text-gray-800 hover:bg-gray-400 focus:ring-gray-300'}
+                `}
               >
-                Gérer les matchs individuellement (Multi-Chrono)
+                Chrono Individuel
               </button>
               <button
                 onClick={() => setShowTimerOptionsModal(false)}
@@ -2249,83 +2335,32 @@ const ResultsPage = ({ onNavigate }) => {
     setMessage("Score mis à jour !");
   };
 
-  const shareResults = (platform) => {
+  const shareResultsWhatsApp = () => {
     try {
-      let resultsHtml = '';
       let resultsText = '';
 
       // Tournament Name
       const tournamentName = tournaments.find(t => t.id === selectedTournamentId)?.name || 'N/A';
       resultsText += `*Résultats de la rencontre "${tournamentName}"*\n\n`; // Bold for WhatsApp
-      resultsHtml += `<h1 style="color:#333; text-align:center; margin-bottom:20px; font-family:'Inter', sans-serif;">Résultats de la rencontre: ${tournamentName}</h1>`;
 
       // Player Ranking
       resultsText += "📊 *Classement des joueurs :*\n";
-      resultsHtml += `<h2 style="color:#4a4a4a; margin-top:30px; margin-bottom:15px; text-align:center; font-family:'Inter', sans-serif;">Classement des joueurs</h2>`;
       if (ranking.length === 0) {
         resultsText += "Aucun classement disponible.\n";
-        resultsHtml += `<p style="text-align:center; color:#666; font-family:'Inter', sans-serif;">Aucun classement disponible.</p>`;
       } else {
-        resultsHtml += `<table style="width:100%; border-collapse:collapse; margin-bottom:20px; font-family:'Inter', sans-serif;">`;
-        resultsHtml += `<thead><tr style="background-color:#e0e7ff;"><th style="padding:10px; border:1px solid #ccc; text-align:left;">Rang</th><th style="padding:10px; border:1px solid #ccc; text-align:left;">Joueur</th><th style="padding:10px; border:1px solid #ccc; text-align:left;">Victoires</th><th style="padding:10px; border:1px solid #ccc; text-align:left;">Défaites</th><th style="padding:10px; border:1px solid #ccc; text-align:left;">Diff. Score</th></tr></thead><tbody>`;
         ranking.forEach((player, index) => {
           resultsText += `${index + 1}. ${player.name} - Victoires: ${player.wins}, Diff. Score: ${player.scoreDifference}\n`;
-          resultsHtml += `<tr style="background-color:${index % 2 === 0 ? '#f0f4ff' : '#ffffff'};"><td style="padding:10px; border:1px solid #ccc;">${index + 1}</td><td style="padding:10px; border:1px solid #ccc;">${player.name}</td><td style="padding:10px; border:1px solid #ccc;">${player.wins}</td><td style="padding:10px; border:1px solid #ccc;">${player.losses}</td><td style="padding:10px; border:1px solid #ccc;">${player.scoreDifference}</td></tr>`;
         });
-        resultsHtml += `</tbody></table>`;
       }
 
-      if (platform === 'whatsapp') {
-        const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(resultsText)}`;
-        window.open(whatsappUrl, '_blank');
-      } else if (platform === 'pdf') {
-        const newWindow = window.open();
-        newWindow.document.write(`
-          <html>
-            <head>
-              <title>MatchPlanner - Résultats</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
-              <style>
-                body { font-family: 'Inter', sans-serif; padding: 20px; color: #333; line-height: 1.6; }
-                table { width: 100%; border-collapse: collapse; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;}
-                th, td { padding: 12px 15px; border: 1px solid #e0e0e0; text-align: left; }
-                th { background-color: #6366f1; color: white; font-weight: 700; text-transform: uppercase; }
-                tr:nth-child(even) { background-color: #f8faff; }
-                tr:hover { background-color: #eef2ff; }
-                h1, h2 { color: #333; text-align: center; margin-bottom: 15px; font-weight: 800; }
-                h1 { font-size: 28px; color: #4338ca; }
-                h2 { font-size: 22px; color: #4f46e5; border-bottom: 2px solid #a5b4fc; padding-bottom: 5px; display: inline-block; }
-                .container { max-width: 800px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                ${resultsHtml}
-              </div>
-            </body>
-          </html>
-        `);
-        newWindow.document.close();
-        newWindow.print();
-      } else if (platform === 'clipboard') {
-        try {
-          const tempTextArea = document.createElement('textarea');
-          tempTextArea.value = resultsText;
-          document.body.appendChild(tempTextArea);
-          tempTextArea.select();
-          document.execCommand('copy');
-          document.body.removeChild(tempTextArea);
-          setMessage("Résultats copiés dans le presse-papiers !");
-        } catch (err) {
-          console.error('Impossible de copier les résultats', err);
-          setMessage("Échec de la copie des résultats.");
-        }
-      }
+      const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(resultsText)}`;
+      window.open(whatsappUrl, '_blank');
     } catch (error) {
-      console.error("Erreur lors du partage des résultats:", error);
-      setMessage(`Erreur lors du partage des résultats: ${error.message}`);
+      console.error("Erreur lors du partage WhatsApp:", error);
+      setMessage(`Erreur lors du partage WhatsApp: ${error.message}`);
     }
   };
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-500 to-indigo-600 text-white p-4 sm:p-8 flex flex-col items-center font-inter">
@@ -2338,7 +2373,7 @@ const ResultsPage = ({ onNavigate }) => {
           Retour à l'accueil
         </button>
       </div>
-      <div className="bg-white bg-opacity-20 backdrop-filter backdrop-blur-lg rounded-xl shadow-2xl p-6 sm:p-10 max-w-4xl w-full text-center border border-white border-opacity-30">
+      <div className="bg-white bg-opacity-20 backdrop-filter backdrop-blur-lg rounded-xl shadow-2xl p-6 sm:p-10 max-w-4xl w-full text-center border border-white border-opacity30">
         <h2 className="text-3xl sm:text-4xl font-bold mb-6 text-center">Résultats et Classement</h2>
 
         <div className="mb-6">
@@ -2389,7 +2424,7 @@ const ResultsPage = ({ onNavigate }) => {
                         <td className="py-3 px-4 flex items-center gap-2">
                           <input
                             type="number"
-                            value={match.scoreTeam1 !== null ? match.scoreTeam1 : ''} // Afficher vide si null
+                            value={match.scoreTeam1 !== null ? match.scoreTeam1 : ''}
                             onChange={(e) => handleScoreChange(match.id, 'team1', e.target.value)}
                             className="w-16 p-1 rounded-md bg-white bg-opacity-30 border border-white border-opacity-40 text-white focus:outline-none focus:ring-1 focus:ring-white custom-number-input"
                             placeholder=""
@@ -2397,7 +2432,7 @@ const ResultsPage = ({ onNavigate }) => {
                           <span>-</span>
                           <input
                             type="number"
-                            value={match.scoreTeam2 !== null ? match.scoreTeam2 : ''} // Afficher vide si null
+                            value={match.scoreTeam2 !== null ? match.scoreTeam2 : ''}
                             onChange={(e) => handleScoreChange(match.id, 'team2', e.target.value)}
                             className="w-16 p-1 rounded-md bg-white bg-opacity-30 border border-white border-opacity-40 text-white focus:outline-none focus:ring-1 focus:ring-white custom-number-input"
                             placeholder=""
@@ -2447,22 +2482,10 @@ const ResultsPage = ({ onNavigate }) => {
 
             <div className="flex flex-wrap justify-center gap-4 mt-8">
               <button
-                onClick={() => shareResults('whatsapp')}
+                onClick={shareResultsWhatsApp}
                 className="bg-green-500 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-green-600 transition duration-300 focus:outline-none focus:ring-4 focus:ring-green-400"
               >
                 Partager sur WhatsApp
-              </button>
-              <button
-                onClick={() => shareResults('pdf')}
-                className="bg-red-500 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-red-600 transition duration-300 focus:outline-none focus:ring-4 focus:ring-red-400"
-              >
-                Exporter en PDF
-              </button>
-              <button
-                onClick={() => shareResults('clipboard')}
-                className="bg-blue-500 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-blue-600 transition duration-300 focus:outline-none focus:ring-4 focus:ring-blue-400"
-              >
-                Copier les résultats
               </button>
             </div>
           </>
@@ -2473,7 +2496,7 @@ const ResultsPage = ({ onNavigate }) => {
             onClick={() => onNavigate('matchSchedule')}
             className="bg-white text-indigo-700 font-bold py-3 px-6 rounded-full shadow-lg hover:bg-indigo-100 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
           >
-            Planification des rencontres
+            Planification des Matchs
           </button>
         </div>
       </div>
@@ -2481,7 +2504,7 @@ const ResultsPage = ({ onNavigate }) => {
       <div className="w-full flex justify-center mt-8">
         <button
           onClick={() => onNavigate('home')}
-          className="bg-transparent border border-white text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
+          className="bg-transparent border border-white text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
         >
           Retour à l'accueil
         </button>
@@ -2616,6 +2639,7 @@ const MatchHistoryPage = ({ onNavigate }) => {
                       <th className="py-3 px-4 text-left text-sm font-semibold">Équipe 1</th>
                       <th className="py-3 px-4 text-left text-sm font-semibold">Score</th>
                       <th className="py-3 px-4 text-left text-sm font-semibold">Équipe 2</th>
+                      <th className="py-3 px-4 text-left text-sm font-semibold">Heure</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2640,7 +2664,7 @@ const MatchHistoryPage = ({ onNavigate }) => {
             onClick={() => onNavigate('matchSchedule')}
             className="bg-white text-indigo-700 font-bold py-3 px-6 rounded-full shadow-lg hover:bg-indigo-100 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
           >
-            Planification des rencontres
+            Planification des Matchs
           </button>
         </div>
       </div>
@@ -2648,7 +2672,7 @@ const MatchHistoryPage = ({ onNavigate }) => {
       <div className="w-full flex justify-center mt-8">
         <button
           onClick={() => onNavigate('home')}
-          className="bg-transparent border border-white text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
+          className="bg-transparent border border-white text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-white hover:bg-opacity-20 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
         >
           Retour à l'accueil
         </button>
@@ -2683,15 +2707,16 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
     // Initialiser les champs numériques à leur valeur ou à une chaîne vide si null/undefined
     setEditingTournament({
       ...tournament,
-      numPlayers: tournament.numPlayers !== undefined && tournament.numPlayers !== null ? String(tournament.numPlayers) : '',
-      numCourts: tournament.numCourts !== undefined && tournament.numCourts !== null ? String(tournament.numCourts) : '',
-      matchDuration: tournament.matchDuration !== undefined && tournament.matchDuration !== null ? String(tournament.matchDuration) : '',
-      breakDuration: tournament.breakDuration !== undefined && tournament.breakDuration !== null ? String(tournament.breakDuration) : '',
-      startTime: tournament.startTime || '', // Load start time string
-      endTime: tournament.endTime || '',      // Load end time string
-      selectedGroupForTournament: tournament.selectedGroupForTournament || '', // Ensure it's a string for select
-      numPlayersPerTeam: tournament.numPlayersPerTeam !== undefined && tournament.numPlayersPerTeam !== null ? String(tournament.numPlayersPerTeam) : '', // Initialiser la nouvelle prop
-      selectedPlayerIds: tournament.selectedPlayerIds || [] // Initialiser les IDs des joueurs sélectionnés
+      name: tournament.name ?? '', // Ensure name is a string
+      numPlayers: String(tournament.numPlayers ?? ''),
+      numCourts: String(tournament.numCourts ?? ''),
+      matchDuration: String(tournament.matchDuration ?? ''),
+      breakDuration: String(tournament.breakDuration ?? ''),
+      startTime: tournament.startTime ?? '', // Load start time string
+      endTime: tournament.endTime ?? '',      // Load end time string
+      selectedGroupForTournament: tournament.selectedGroupForTournament ?? '', // Ensure it's a string for select
+      numPlayersPerTeam: String(tournament.numPlayersPerTeam ?? ''), // Initialiser la nouvelle prop
+      selectedPlayerIds: tournament.selectedPlayerIds ?? [] // Initialiser les IDs des joueurs sélectionnés
     });
   };
 
@@ -2731,11 +2756,17 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
         return;
     }
 
-    // Validate start time is before end time
+    // Validate start time is before end time, handling midnight crossover
     const startDateTime = new Date(`2000-01-01T${editingTournament.startTime}`);
-    const endDateTime = new Date(`2000-01-01T${editingTournament.endTime}`);
-    if (endDateTime <= startDateTime) {
-      setMessage("L'heure de fin doit être après l'heure de début.");
+    let endDateTime = new Date(`2000-01-01T${editingTournament.endTime}`);
+
+    // If end time is numerically earlier than start time, assume it's on the next day
+    if (endDateTime.getTime() <= startDateTime.getTime() && editingTournament.endTime !== editingTournament.startTime) {
+      endDateTime.setDate(endDateTime.getDate() + 1); // Add one day
+    }
+
+    if (endDateTime.getTime() <= startDateTime.getTime()) { // Re-check after potential adjustment
+      setMessage("L'heure de fin doit être après l'heure de début, ou sur le jour suivant si la rencontre se prolonge après minuit.");
       return;
     }
 
@@ -2766,33 +2797,10 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
     return group ? group.name : 'Aucun groupe';
   };
 
-  const handleEditPlayerSelection = (tournament) => {
-    // Set the editing tournament and open the modal
-    setEditingTournament({
-      ...tournament,
-      numPlayers: String(tournament.numPlayers), // Ensure it's a string for the input
-      numPlayersPerTeam: String(tournament.numPlayersPerTeam),
-      numCourts: String(tournament.numCourts),
-      matchDuration: String(tournament.matchDuration),
-      breakDuration: String(tournament.breakDuration),
-      startTime: tournament.startTime || '',
-      endTime: tournament.endTime || '',
-      selectedGroupForTournament: tournament.selectedGroupForTournament || '',
-      selectedPlayerIds: tournament.selectedPlayerIds || []
-    });
-    // Now call the App's modal handler
-    onOpenPlayerSelectionModal(tournament.selectedGroupForTournament, tournament.selectedPlayerIds, (newSelectedIds) => {
-      setEditingTournament(prev => ({
-        ...prev,
-        selectedPlayerIds: newSelectedIds,
-        numPlayers: String(newSelectedIds.length)
-      }));
-      setMessage("Sélection des joueurs mise à jour pour la modification !");
-    });
-  };
 
   const handleLoadTournament = (tournament) => {
-    onNavigate('matchSchedule', { selectedTournament: tournament });
+    // Navigate to tournamentSetup and pass the tournament object to load
+    onNavigate('tournamentSetup', { tournamentToLoad: { ...tournament } }); // Pass a new object reference
   };
 
 
@@ -2818,7 +2826,9 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
           <p className="text-center opacity-80 mb-6">Aucune rencontre créée pour le moment.</p>
         ) : (
           <ul className="space-y-4 mb-8 max-h-96 overflow-y-auto pr-2">
-            {tournaments.map(tournament => (
+            {tournaments
+              .filter(t => t != null) // Filter out null/undefined tournaments
+              .map(tournament => (
               <li key={tournament.id} className="bg-white bg-opacity-15 p-4 rounded-lg shadow-md border border-white border-opacity-20">
                 {editingTournament && editingTournament.id === tournament.id ? (
                   // Formulaire d'édition
@@ -2829,7 +2839,7 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
                         type="text"
                         id={`editName-${tournament.id}`}
                         value={editingTournament.name}
-                        onChange={(e) => setEditingTournament({ ...editingTournament, name: e.target.value })} // Permet la chaîne vide
+                        onChange={(e) => setEditingTournament(prev => ({ ...prev, name: e.target.value }))} // Corrected
                         className="w-full p-2 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white"
                       />
                     </div>
@@ -2856,14 +2866,14 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
                         ))}
                       </select>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-4 w-full"> {/* Changed to space-y-4 for vertical stacking */}
                       <div>
                         <label htmlFor={`editPlayers-${tournament.id}`} className="block text-sm font-medium mb-1">Joueurs</label>
                         <input
                           type="number"
                           id={`editPlayers-${tournament.id}`}
                           value={editingTournament.numPlayers}
-                          onChange={(e) => setEditingTournament({ ...editingTournament, numPlayers: e.target.value })} // Permet la chaîne vide
+                          onChange={(e) => setEditingTournament(prev => ({ ...prev, numPlayers: e.target.value }))} // Corrected
                           min="0"
                           className="w-full p-2 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white custom-number-input"
                           readOnly // Make it readOnly, selection is via modal
@@ -2875,28 +2885,18 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
                           type="number"
                           id={`editPlayersPerTeam-${tournament.id}`}
                           value={editingTournament.numPlayersPerTeam}
-                          onChange={(e) => setEditingTournament({ ...editingTournament, numPlayersPerTeam: e.target.value })} // Permet la chaîne vide
+                          onChange={(e) => setEditingTournament(prev => ({ ...prev, numPlayersPerTeam: e.target.value }))} // Corrected
                           min="1"
                           className="w-full p-2 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white custom-number-input"
                         />
                       </div>
-                    </div>
-                    {editingTournament.selectedGroupForTournament && (
-                      <button
-                        onClick={() => handleEditPlayerSelection(editingTournament)} // Re-use the edit handler to open modal
-                        className="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-blue-600 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
-                      >
-                        Modifier la sélection des joueurs ({editingTournament.selectedPlayerIds.length} joueurs)
-                      </button>
-                    )}
-                    <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label htmlFor={`editCourts-${tournament.id}`} className="block text-sm font-medium mb-1">Terrains</label>
                         <input
                           type="number"
                           id={`editCourts-${tournament.id}`}
                           value={editingTournament.numCourts}
-                          onChange={(e) => setEditingTournament({ ...editingTournament, numCourts: e.target.value })} // Permet la chaîne vide
+                          onChange={(e) => setEditingTournament(prev => ({ ...prev, numCourts: e.target.value }))} // Corrected
                           min="1"
                           className="w-full p-2 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white custom-number-input"
                         />
@@ -2907,43 +2907,41 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
                           type="number"
                           id={`editMatchDuration-${tournament.id}`}
                           value={editingTournament.matchDuration}
-                          onChange={(e) => setEditingTournament({ ...editingTournament, matchDuration: e.target.value })} // Permet la chaîne vide
+                          onChange={(e) => setEditingTournament(prev => ({ ...prev, matchDuration: e.target.value }))} // Corrected
                           min="1"
                           className="w-full p-2 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white custom-number-input"
                         />
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label htmlFor={`editBreakDuration-${tournament.id}`} className="block text-sm font-medium mb-1">Durée pause (min)</label>
                         <input
                           type="number"
                           id={`editBreakDuration-${tournament.id}`}
                           value={editingTournament.breakDuration}
-                          onChange={(e) => setEditingTournament({ ...editingTournament, breakDuration: e.target.value })} // Permet la chaîne vide
+                          onChange={(e) => setEditingTournament(prev => ({ ...prev, breakDuration: e.target.value }))} // Corrected
                           min="0"
                           className="w-full p-2 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white custom-number-input"
                         />
                       </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label htmlFor={`editStartTime-${tournament.id}`} className="block text-sm font-medium mb-1">Heure de début</label>
                         <input
                           type="time"
                           id={`editStartTime-${tournament.id}`}
                           value={editingTournament.startTime}
-                          onChange={(e) => setEditingTournament({ ...editingTournament, startTime: e.target.value })}
+                          onChange={(e) => setEditingTournament(prev => ({ ...prev, startTime: e.target.value }))} // Corrected
                           className="w-full p-2 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white"
                         />
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label htmlFor={`editEndTime-${tournament.id}`} className="block text-sm font-medium mb-1">Heure de fin</label>
                         <input
                           type="time"
                           id={`editEndTime-${tournament.id}`}
                           value={editingTournament.endTime}
-                          onChange={(e) => setEditingTournament({ ...editingTournament, endTime: e.target.value })}
+                          onChange={(e) => setEditingTournament(prev => ({ ...prev, endTime: e.target.value }))} // Corrected
                           className="w-full p-2 rounded-lg bg-white bg-opacity-30 border border-white border-opacity-40 text-white"
                         />
                       </div>
@@ -2957,6 +2955,26 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
                     >
                       Équilibrage par niveau: {editingTournament.balanceTeamsByLevel ? 'Activé' : 'Désactivé'}
                     </button>
+                    {/* Button to open player selection modal for editing */}
+                    {editingTournament.selectedGroupForTournament && (
+                      <button
+                        onClick={() => onOpenPlayerSelectionModal(
+                          editingTournament.selectedGroupForTournament,
+                          editingTournament.selectedPlayerIds,
+                          (newSelectedIds) => {
+                            setEditingTournament(prev => ({
+                              ...prev,
+                              selectedPlayerIds: newSelectedIds,
+                              numPlayers: String(newSelectedIds.length)
+                            }));
+                            setMessage("Sélection des joueurs mise à jour pour la modification !");
+                          }
+                        )}
+                        className="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded-full shadow-lg hover:bg-blue-600 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50 mt-4"
+                      >
+                        Modifier la sélection des joueurs ({editingTournament.selectedPlayerIds.length} joueurs)
+                      </button>
+                    )}
                     <div className="flex justify-end gap-2 mt-4">
                       <button
                         onClick={handleSaveEditedTournament}
@@ -2991,19 +3009,19 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
                     <div className="flex gap-2 mt-3 sm:mt-0">
                       <button
                         onClick={() => handleEditTournament(tournament)}
-                        className="bg-blue-500 text-white py-2 px-4 rounded-full text-sm hover:bg-blue-600 transition duration-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        className="bg-blue-500 text-white py-1 px-2 rounded-full text-xs hover:bg-blue-600 transition duration-300 focus:outline-none focus:ring-2 focus:ring-blue-400" // Reduced padding and font size
                       >
                         Modifier
                       </button>
                       <button
                         onClick={() => handleDeleteTournament(tournament.id)}
-                        className="bg-red-500 text-white py-2 px-4 rounded-full text-sm hover:bg-red-600 transition duration-300 focus:outline-none focus:ring-2 focus:ring-red-400"
+                        className="bg-red-500 text-white py-1 px-2 rounded-full text-xs hover:bg-red-600 transition duration-300 focus:outline-none focus:ring-2 focus:ring-red-400" // Reduced padding and font size
                       >
                         Supprimer
                       </button>
                       <button
                         onClick={() => handleLoadTournament(tournament)}
-                        className="bg-green-500 text-white py-2 px-4 rounded-full text-sm hover:bg-green-600 transition duration-300 focus:outline-none focus:ring-2 focus:ring-green-400"
+                        className="bg-green-500 text-white py-1 px-2 rounded-full text-xs hover:bg-green-600 transition duration-300 focus:outline-none focus:ring-2 focus:ring-green-400" // Reduced padding and font size
                       >
                         Charger la rencontre
                       </button>
@@ -3038,29 +3056,32 @@ const ManageTournaments = ({ onNavigate, onOpenPlayerSelectionModal, selectedPla
 const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
 
-  // States for TournamentSetup
-  const [tournamentName, setTournamentName] = useState('');
-  const [numPlayers, setNumPlayers] = useState(''); // This state is now only used to reflect selectedPlayerIds.length
-  const [numPlayersPerTeam, setNumPlayersPerTeam] = useState('2'); // Nouveau state pour le nombre de joueurs par équipe, par défaut 2
-  const [numCourts, setNumCourts] = useState('');
-  const [matchDuration, setMatchDuration] = useState('');
-  const [breakDuration, setBreakDuration] = useState('');
-  const [tournamentStartTime, setTournamentStartTime] = useState(''); // New state
-  const [tournamentEndTime, setTournamentEndTime] = useState('');      // New state
-  const [balanceTeamsByLevel, setBalanceTeamsByLevel] = useState(false);
-  // eslint-disable-next-line no-unused-vars
-  const [playerCountFromManagement, setPlayerCountFromManagement] = useState(0); // Removed as it was unused.
-  const [selectedGroupForTournament, setSelectedGroupForTournament] = useState('');
-  // Nouveau state pour stocker les IDs des joueurs sélectionnés pour la rencontre en cours de configuration/visualisation
-  const [selectedPlayerIdsForCurrentTournament, setSelectedPlayerIdsForCurrentTournament] = useState([]);
+  // Initial state for tournament configuration form
+  const initialTournamentConfigState = useMemo(() => ({
+    tournamentName: '',
+    numPlayers: '', // This will be derived from selectedPlayerIds
+    numPlayersPerTeam: '2',
+    numCourts: '',
+    matchDuration: '',
+    breakDuration: '',
+    tournamentStartTime: '',
+    tournamentEndTime: '',
+    balanceTeamsByLevel: false,
+    selectedGroupForTournament: '',
+    selectedPlayerIds: [],
+  }), []);
+
+  // State to hold the current tournament configuration being edited/created
+  const [currentTournamentConfig, setCurrentTournamentConfig] = useState(initialTournamentConfigState);
 
 
   // States for MatchSchedule, managed at the App level
   const [selectedTournamentForSchedule, setSelectedTournamentForSchedule] = useState(null);
-  const [generatedScheduleTours, setGeneratedScheduleTours] = useState([]);
+  const [generatedSchedules, setGeneratedSchedules] = useState([]);
   const [currentTourIndex, setCurrentTourIndex] = useState(0);
   const [generatedForTournamentId, setGeneratedForTournamentId] = useState(null);
-  const [lastGeneratedTournamentConfig, setLastGeneratedTournamentConfig] = useState(null);
+  const { lastGeneratedTournamentConfig, setLastGeneratedTournamentConfig } = useLocalData(); // Get from context
+
 
   // States for Player Selection Modal (Lifted from TournamentSetup/ManageTournaments)
   const [showPlayerSelectionModal, setShowPlayerSelectionModal] = useState(false);
@@ -3103,71 +3124,84 @@ const App = () => {
   // Effect to load the schedule and selected players when selectedTournamentForSchedule changes
   useEffect(() => {
     if (selectedTournamentForSchedule) {
-      const savedSchedule = getGeneratedSchedule(selectedTournamentForSchedule.id);
-
-      // Only update if the schedule has actually changed to prevent infinite loops
-      // Simple shallow comparison: check length and first element's ID
-      const isScheduleDifferent = savedSchedule.length !== generatedScheduleTours.length ||
-                                 (savedSchedule.length > 0 && generatedScheduleTours.length > 0 && savedSchedule[0].id !== generatedScheduleTours[0].id) ||
-                                 (savedSchedule.length === 0 && generatedScheduleTours.length > 0) ||
-                                 (savedSchedule.length > 0 && generatedScheduleTours.length === 0);
-
-      if (isScheduleDifferent) {
-        setGeneratedScheduleTours(savedSchedule);
+      // Defer state updates to avoid "setState in render" warning
+      const timeoutId = setTimeout(() => {
+        const savedSchedule = getGeneratedSchedule(selectedTournamentForSchedule.id);
+        setGeneratedSchedules(savedSchedule);
         setGeneratedForTournamentId(selectedTournamentForSchedule.id);
-        setLastGeneratedTournamentConfig({ ...selectedTournamentForSchedule });
-
         const firstUncompletedIndex = savedSchedule.findIndex(tour => !tour.isCompleted);
         const newCurrentTourIndex = firstUncompletedIndex !== -1 ? firstUncompletedIndex : savedSchedule.length;
         setCurrentTourIndex(newCurrentTourIndex);
-      }
-      // Load selected players for the currently selected tournament
-      setSelectedPlayerIdsForCurrentTournament(selectedTournamentForSchedule.selectedPlayerIds || []);
-
+      }, 0); // Defer to next tick
+      return () => clearTimeout(timeoutId);
     } else {
-      // Clear all schedule related states if no tournament is selected
-      if (generatedScheduleTours.length > 0 || generatedForTournamentId !== null || lastGeneratedTournamentConfig !== null) {
-        setGeneratedScheduleTours([]);
-        setCurrentTourIndex(0);
-        setGeneratedForTournamentId(null);
-        setLastGeneratedTournamentConfig(null);
-      }
-      setSelectedPlayerIdsForCurrentTournament([]); // Clear selected players too
+      // Clear states immediately if no tournament selected
+      setGeneratedSchedules([]);
+      setCurrentTourIndex(0);
+      setGeneratedForTournamentId(null);
     }
-  }, [selectedTournamentForSchedule, getGeneratedSchedule, generatedScheduleTours, generatedForTournamentId, lastGeneratedTournamentConfig]);
+  }, [selectedTournamentForSchedule, getGeneratedSchedule]); // Removed generatedSchedules, generatedForTournamentId, lastGeneratedTournamentConfig from dependencies as they are set here
 
 
   // Effect to set initial selected tournament for schedule when tournaments load or change
   useEffect(() => {
-    if (tournaments.length > 0) {
-      let initialTournament = null;
-      // Try to find the currently selected tournament (by ID) in the updated tournaments list
-      if (selectedTournamentForSchedule) {
-        initialTournament = tournaments.find(t => t.id === selectedTournamentForSchedule.id);
-      }
+    if (!tournaments.length) {
+      setSelectedTournamentForSchedule(null);
+      return;
+    }
 
-      // If no tournament was selected, or the previously selected one is no longer found,
-      // or if the found tournament's config has changed from what was last generated,
-      // then update selectedTournamentForSchedule. This ensures we always have the latest object.
-      if (initialTournament && (initialTournament !== selectedTournamentForSchedule || !areTournamentConfigsEqual(initialTournament, selectedTournamentForSchedule))) {
-        setSelectedTournamentForSchedule(initialTournament);
-      } else if (!initialTournament && tournaments.length > 0) {
-        // If no tournament was selected or the old one is gone, pick the first one
-        setSelectedTournamentForSchedule(tournaments[0]);
-      }
-    } else {
-      // If no tournaments exist, clear the selected tournament
+    let newSelected = null;
+    if (selectedTournamentForSchedule) {
+      // If a tournament was already selected, try to find its updated version
+      newSelected = tournaments.find(t => t.id === selectedTournamentForSchedule.id);
+    }
+
+    if (!newSelected) {
+      // If no tournament was previously selected, or the old one is gone, pick the first one
+      newSelected = tournaments[0];
+    }
+
+    // Only update if the object reference is different, or if content has changed
+    // This check is important to prevent unnecessary re-renders if only the reference is the same but content changed.
+    if (newSelected !== selectedTournamentForSchedule || (newSelected && selectedTournamentForSchedule && !areTournamentConfigsEqual(newSelected, selectedTournamentForSchedule))) {
+      setSelectedTournamentForSchedule(newSelected);
+    } else if (!newSelected && selectedTournamentForSchedule) {
+      // If no tournaments exist but one was selected, clear it
       setSelectedTournamentForSchedule(null);
     }
-  }, [tournaments, selectedTournamentForSchedule]); // Depend on tournaments to react to changes
+
+  }, [tournaments, selectedTournamentForSchedule]); // Removed areTournamentConfigsEqual from dependencies
 
 
-  const navigateTo = (page, params = {}) => {
+  const navigateTo = useCallback((page, params = {}) => {
     setCurrentPage(page);
-    if (page === 'matchSchedule' && params.selectedTournament) {
-      setSelectedTournamentForSchedule(params.selectedTournament);
+    if (page === 'matchSchedule') {
+      const tournament = params.selectedTournament || selectedTournamentForSchedule; // Use passed or current
+      setSelectedTournamentForSchedule(tournament);
+      // When navigating to matchSchedule, reset the tournament setup form state
+      setCurrentTournamentConfig(initialTournamentConfigState);
+      // Set selectedPlayerIdsForCurrentTournament for the schedule page
+      // This state is now directly derived in MatchSchedule from selectedTournament.selectedPlayerIds
+      // so we don't need a separate state in App for it.
+    } else if (page === 'tournamentSetup') {
+      if (params.tournamentToLoad) {
+        // Load existing tournament data into the form
+        // Create a new object reference to ensure useEffect in TournamentSetup triggers
+        setCurrentTournamentConfig({ ...params.tournamentToLoad }); // Pass a new object reference
+        setSelectedTournamentForSchedule(null);
+      } else {
+        // For a new tournament creation, reset to initial empty state
+        setCurrentTournamentConfig(initialTournamentConfigState);
+        // Clear selectedTournamentForSchedule if starting new tournament
+        setSelectedTournamentForSchedule(null);
+      }
+    } else {
+      // For any other page, reset the tournament setup form state and selected schedule
+      setCurrentTournamentConfig(initialTournamentConfigState);
+      setSelectedTournamentForSchedule(null);
     }
-  };
+  }, [initialTournamentConfigState, selectedTournamentForSchedule]); // Depend on initialTournamentConfigState
+
 
   let PageComponent;
   switch (currentPage) {
@@ -3178,29 +3212,9 @@ const App = () => {
       PageComponent = (
         <TournamentSetup
           onNavigate={navigateTo}
-          tournamentName={tournamentName}
-          setTournamentName={setTournamentName}
-          numPlayers={numPlayers}
-          setNumPlayers={setNumPlayers}
-          numCourts={numCourts}
-          setNumCourts={setNumCourts}
-          matchDuration={matchDuration}
-          setMatchDuration={setMatchDuration}
-          breakDuration={breakDuration}
-          setBreakDuration={setBreakDuration}
-          tournamentStartTime={tournamentStartTime} // Pass new prop
-          setTournamentStartTime={setTournamentStartTime} // Pass new prop
-          tournamentEndTime={tournamentEndTime}      // Pass new prop
-          setTournamentEndTime={setTournamentEndTime}      // Pass new prop
-          balanceTeamsByLevel={balanceTeamsByLevel}
-          setBalanceTeamsByLevel={setBalanceTeamsByLevel}
-          selectedGroupForTournament={selectedGroupForTournament}
-          setSelectedGroupForTournament={setSelectedGroupForTournament}
-          numPlayersPerTeam={numPlayersPerTeam} // Passe la nouvelle prop
-          setNumPlayersPerTeam={setNumPlayersPerTeam} // Passe le setter de la nouvelle prop
-          selectedPlayerIdsForCurrentTournament={selectedPlayerIdsForCurrentTournament} // Passe la nouvelle prop
-          setSelectedPlayerIdsForCurrentTournament={setSelectedPlayerIdsForCurrentTournament} // Passe le setter de la nouvelle prop
-          onOpenPlayerSelectionModal={handleOpenPlayerSelectionModal} // Pass the handler to open modal
+          tournamentConfig={currentTournamentConfig} // Pass the entire config object
+          setTournamentConfig={setCurrentTournamentConfig} // Pass the setter for the config object
+          onOpenPlayerSelectionModal={handleOpenPlayerSelectionModal}
         />
       );
       break;
@@ -3213,15 +3227,15 @@ const App = () => {
           onNavigate={navigateTo}
           selectedTournament={selectedTournamentForSchedule} // Pass the selected tournament
           onSelectTournament={setSelectedTournamentForSchedule} // Pass setter to update App's state
-          generatedScheduleTours={generatedScheduleTours}
-          setGeneratedScheduleTours={setGeneratedScheduleTours}
+          generatedSchedules={generatedSchedules}
+          setGeneratedSchedules={setGeneratedSchedules}
           currentTourIndex={currentTourIndex}
           setCurrentTourIndex={setCurrentTourIndex}
           generatedForTournamentId={generatedForTournamentId}
           setGeneratedForTournamentId={setGeneratedForTournamentId}
-          lastGeneratedTournamentConfig={lastGeneratedTournamentConfig}
-          setLastGeneratedTournamentConfig={setLastGeneratedTournamentConfig}
-          selectedPlayerIdsForCurrentTournament={selectedPlayerIdsForCurrentTournament} // Passe la nouvelle prop
+          lastGeneratedTournamentConfig={lastGeneratedTournamentConfig} // Pass from App's state
+          setLastGeneratedTournamentConfig={setLastGeneratedTournamentConfig} // Pass from App's state
+          selectedPlayerIdsForCurrentTournament={selectedTournamentForSchedule?.selectedPlayerIds || []} // Pass selectedPlayerIds from the selected tournament
         />
       );
       break;
@@ -3233,8 +3247,8 @@ const App = () => {
         <ManageTournaments
           onNavigate={navigateTo}
           onOpenPlayerSelectionModal={handleOpenPlayerSelectionModal}
-          selectedPlayerIdsForCurrentTournament={selectedPlayerIdsForCurrentTournament} // Pass the state
-          setSelectedPlayerIdsForCurrentTournament={setSelectedPlayerIdsForCurrentTournament} // Pass the setter
+          // selectedPlayerIdsForCurrentTournament is not directly used by ManageTournaments for its own state,
+          // but passed to the modal handler. The modal will receive the correct initial IDs via its props.
         />
       );
       break;
